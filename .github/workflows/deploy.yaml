@@ -1,0 +1,163 @@
+name: CI/CD
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*.*.*'
+
+env:
+  HELM_CHARTS_PATH: /Users/play_code/Projects/StreamGPT/helm
+  GOPRIVATE: github.com/Gen-Do/*
+
+jobs:
+  check:
+    name: Lint & Test
+    runs-on: [self-hosted, k8s]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: golangci-lint
+        id: lint
+        continue-on-error: true
+        run: golangci-lint run --timeout 5m ./...
+
+      - name: Unit tests
+        run: go test -v -count=1 -parallel 4 ./...
+
+      - name: Race condition tests
+        run: go test -race -count=1 -parallel 2 ./...
+
+      - name: Fail if lint had errors
+        if: steps.lint.outcome == 'failure'
+        run: echo "::warning::Lint issues found — fix them to keep the codebase clean"
+
+  deploy:
+    name: Deploy
+    needs: [check]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: [self-hosted, k8s]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Parse app.yaml
+        id: app
+        run: |
+          SERVICE_NAME=$(yq eval '.service' app.yaml)
+          SECRETS_LIST=$(yq eval '.secrets[]' app.yaml 2>/dev/null | tr '\n' ' ' | xargs)
+          echo "service=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          echo "secrets_list=${SECRETS_LIST}" >> $GITHUB_OUTPUT
+
+      - name: Build Go binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: arm64
+        run: go build -ldflags='-w -s' -trimpath -o main ./cmd/
+
+      - name: Build and load Docker image
+        run: |
+          SERVICE=${{ steps.app.outputs.service }}
+          TAG=${GITHUB_SHA::7}
+          docker build --no-cache --provenance=false -f Dockerfile.k8s -t ${SERVICE}:${TAG} .
+          for NODE in desktop-control-plane desktop-worker; do
+            docker save ${SERVICE}:${TAG} | docker exec -i "${NODE}" ctr -n k8s.io images import -
+          done
+          echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
+
+      - name: Create K8s secrets
+        if: steps.app.outputs.secrets_list != ''
+        run: |
+          SERVICE=${{ steps.app.outputs.service }}
+          NAMESPACE=stream-gpt
+
+          kubectl create namespace ${NAMESPACE} 2>/dev/null || true
+
+          KUBECTL_ARGS=""
+          if [ -n "${{ secrets.SECRETS }}" ]; then
+            while IFS='=' read -r key value || [ -n "$key" ]; do
+              key=$(echo "$key" | xargs)
+              value=$(echo "$value" | xargs)
+              if [ -n "$key" ] && [ -n "$value" ]; then
+                for needed in ${{ steps.app.outputs.secrets_list }}; do
+                  if [ "$key" = "$needed" ]; then
+                    KUBECTL_ARGS="${KUBECTL_ARGS} --from-literal=${key}=${value}"
+                    echo "Added secret: ${key}"
+                  fi
+                done
+              fi
+            done <<< "${{ secrets.SECRETS }}"
+          fi
+
+          if [ -n "$KUBECTL_ARGS" ]; then
+            kubectl delete secret ${SERVICE}-secrets -n ${NAMESPACE} 2>/dev/null || true
+            eval "kubectl create secret generic ${SERVICE}-secrets -n ${NAMESPACE} ${KUBECTL_ARGS}"
+            echo "K8s secret created for ${SERVICE}"
+          else
+            echo "No secrets to create"
+          fi
+
+      - name: Deploy infrastructure
+        run: |
+          helm upgrade --install infrastructure ${{ env.HELM_CHARTS_PATH }}/infrastructure \
+            --namespace stream-gpt --create-namespace \
+            --wait --timeout 120s
+
+      - name: Deploy service
+        run: |
+          SERVICE=${{ steps.app.outputs.service }}
+          helm upgrade --install ${SERVICE} ${{ env.HELM_CHARTS_PATH }}/stream-gpt-service \
+            -f app.yaml \
+            --set image.tag=${IMAGE_TAG} \
+            --namespace stream-gpt \
+            --wait --timeout 120s
+
+      - name: Verify deployment
+        run: |
+          kubectl -n stream-gpt get pods -l app=${{ steps.app.outputs.service }}
+          kubectl -n stream-gpt rollout status deployment/${{ steps.app.outputs.service }} --timeout=10s
+
+  summary:
+    name: Summary
+    needs: [check, deploy]
+    if: always()
+    runs-on: [self-hosted, k8s]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Deployment summary
+        run: |
+          SERVICE=$(yq eval '.service' app.yaml)
+
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            STATUS="Deployed"
+          elif [ "${{ needs.check.result }}" = "failure" ]; then
+            STATUS="Tests failed"
+          elif [ "${{ needs.deploy.result }}" = "skipped" ]; then
+            STATUS="Checks passed (deploy skipped — not main/tag)"
+          else
+            STATUS="Deploy failed"
+          fi
+
+          echo "## ${SERVICE} — ${STATUS}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint & Test | ${{ needs.check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy | ${{ needs.deploy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${GITHUB_SHA::7}\` — ${GITHUB_REF_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

@@ -21,7 +21,7 @@ require (
 )
 
 require (
-	github.com/Gen-Do/lib-observability v1.0.1
+	github.com/Gen-Do/lib-observability v1.0.6
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
