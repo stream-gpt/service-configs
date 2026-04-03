@@ -1,0 +1,75 @@
+openapi: '3.2.0'
+info:
+  title: configs-service
+  version: '1.0'
+servers:
+  - name: Local
+    url: http://localhost:8080/v1
+paths:
+  /example:
+    get:
+      operationId: get_example
+      parameters:
+        - $ref: '#/components/parameters/ExampleParameter'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExampleResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  parameters:
+    ExampleParameter:
+      name: name
+      in: query
+      required: true
+      schema:
+        type: string
+        example: John Doe
+  schemas:
+    ExampleResponseBody:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Hello, John Doe!
+  responses:
+    ExampleResponse:
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ExampleResponseBody'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Forbidden
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Not Found
+    InternalServerError:
+      description: Internal Server Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Internal Server Error

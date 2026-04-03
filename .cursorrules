@@ -1,0 +1,62 @@
+## Cursor rules for this Go service skeleton
+
+### Repository layout and roles
+- **cmd/**: entrypoint (`main.go`). Initialize env, logger, tracing, metrics, server.
+- **internal/pkg/logger**: Logrus setup. Adds `service` and `version` fields automatically.
+- **internal/pkg/tracing**: OpenTelemetry setup. Global tracer provider is registered. Export via OTLP/HTTP when enabled.
+- **internal/pkg/metrics**: Prometheus registry, HTTP middleware, and `/metrics` handler.
+- **internal/pkg/server**: Chi router + middleware, helpers for routes and health checks.
+- **internal/pkg/shutdown**: Graceful shutdown (SIGINT/SIGTERM).
+- **api/**: OpenAPI specs. `make generate` places generated code under `internal/generated`.
+
+### Environment configuration
+- Use `env.LoadEnvFiles()` to load `.env.paas` then `.env.override` (override order).
+- Common variables:
+  - `PORT` (default `8080`)
+  - `HTTP_READ_TIMEOUT`, `HTTP_WRITE_TIMEOUT`, `HTTP_IDLE_TIMOUT` (seconds)
+  - `SERVICE_NAME` (default `skeleton`), `SERVICE_VERSION` (default `0`)
+  - `LOG_FORMAT` (`json`|`text`, default `json`), `LOG_LEVEL` (`debug`..`error`, default `info`)
+  - `TRACING_ENABLED` (`false` by default). Controls export only.
+  - `TRACING_ENDPOINT` (default `http://localhost:4318/v1/traces`)
+  - `TRACING_SAMPLING_RATE` (default `1.0`)
+
+### Observability requirements
+- Logging: always include `trace_id`, `service`, `version`. Prefer JSON in production.
+- Tracing: ensure `otelhttp` middleware executes BEFORE request logging middleware to have non-zero `trace_id` in logs.
+- Tracer provider must be registered globally regardless of `TRACING_ENABLED`; when disabled, spans are created (IDs generated) but not exported.
+- Metrics: expose `/metrics`; use `Metrics.Middleware()` for automatic HTTP metrics.
+
+### Server and middleware guidelines
+- Initialize components in `main.go` in this order: env -> logger -> tracing -> metrics -> server.
+- Call `AddHealthCheck("/health")` and mount `/metrics` handler.
+- Middleware order in `internal/pkg/server` should be:
+  1) base (RequestID, RealIP)
+  2) `otelhttp.NewMiddleware(...)`
+  3) logging middleware
+  4) recoverer
+- Add extra middleware via `Server.AddMiddleware(...)`.
+
+### Tracing specifics
+- Propagation: W3C Trace Context via `otelhttp`. Incoming `traceparent` headers are honored.
+- Export: OTLP/HTTP to `TRACING_ENDPOINT` when `TRACING_ENABLED=true`.
+- Sampling: control with `TRACING_SAMPLING_RATE` (0..1). Applies even when export is off.
+
+### Coding conventions (Go)
+- Keep code readable: guard clauses, minimal nesting, handle errors early.
+- Name functions with verbs; variables with descriptive nouns.
+- Avoid global state; pass dependencies explicitly.
+- Avoid catching errors without action; log with context.
+- Match existing formatting; do not reformat unrelated code.
+
+### PR/maintenance checklist
+- Verify `trace_id` present and non-zero in access logs.
+- `GET /health` returns 200 JSON; `/metrics` reachable when metrics enabled.
+- Build succeeds: `go build ./...`.
+- If adding HTTP endpoints, register under `/api/v1` or appropriate prefix.
+
+### Quick usage recipes
+- Logger: `log := logger.New()`; add fields via `log.WithField(s)`.
+- Tracing: call `tracing.New()` early; defer `Shutdown(ctx)`.
+- Metrics: `metrics.New()`, `AddMiddleware`, expose handler on `/metrics`.
+- Server: `server.New(metrics, log)`; use `Get`, `Post`, `Route`, `AddMiddleware`, `StartAsync`.
+
