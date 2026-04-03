@@ -1,75 +1,222 @@
-openapi: '3.2.0'
+openapi: '3.0.3'
 info:
   title: configs-service
   version: '1.0'
 servers:
-  - name: Local
-    url: http://localhost:8080/v1
+  - url: http://localhost:8080/v1
 paths:
-  /example:
+  /configs:
+    post:
+      operationId: create_config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConfigRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     get:
-      operationId: get_example
-      parameters:
-        - $ref: '#/components/parameters/ExampleParameter'
+      operationId: list_configs
       responses:
         '200':
-          $ref: '#/components/responses/ExampleResponse'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - configs
+                properties:
+                  configs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConfigEntry'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /configs/{key}:
+    parameters:
+      - $ref: '#/components/parameters/ConfigKey'
+    get:
+      operationId: get_config
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigEntry'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: update_config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConfigRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: delete_config
+      responses:
+        '204':
+          description: No Content
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/configs/batch:
+    post:
+      operationId: batch_get_configs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchGetRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchGetResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
   parameters:
-    ExampleParameter:
-      name: name
-      in: query
+    ConfigKey:
+      name: key
+      in: path
       required: true
       schema:
         type: string
-        example: John Doe
+        pattern: '^[a-z][a-z0-9_]{0,254}$'
+
   schemas:
-    ExampleResponseBody:
+    ConfigEntry:
+      type: object
+      required:
+        - key
+        - value
+        - description
+        - created_at
+        - updated_at
+      properties:
+        key:
+          type: string
+        value: {}
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateConfigRequest:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,254}$'
+        value: {}
+        description:
+          type: string
+          default: ''
+
+    UpdateConfigRequest:
+      type: object
+      required:
+        - value
+      properties:
+        value: {}
+        description:
+          type: string
+
+    BatchGetRequest:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 100
+
+    BatchGetResponse:
+      type: object
+      required:
+        - configs
+      properties:
+        configs:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ConfigEntry'
+
+    ErrorResponse:
       type: object
       properties:
         message:
           type: string
-          example: Hello, John Doe!
+
   responses:
-    ExampleResponse:
-      description: OK
+    BadRequest:
+      description: Bad Request
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ExampleResponseBody'
-    Forbidden:
-      description: Forbidden
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              message:
-                type: string
-                example: Forbidden
+            $ref: '#/components/schemas/ErrorResponse'
     NotFound:
       description: Not Found
       content:
         application/json:
           schema:
-            type: object
-            properties:
-              message:
-                type: string
-                example: Not Found
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     InternalServerError:
       description: Internal Server Error
       content:
         application/json:
           schema:
-            type: object
-            properties:
-              message:
-                type: string
-                example: Internal Server Error
+            $ref: '#/components/schemas/ErrorResponse'

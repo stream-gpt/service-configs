@@ -2,16 +2,22 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"time"
 
 	observability "github.com/Gen-Do/lib-observability"
 	platform "github.com/Gen-Do/lib-platform"
 	"github.com/Gen-Do/lib-transport/listener"
-	"github.com/Gen-Do/service-configs/internal/api/get_example"
+	"github.com/Gen-Do/service-configs/internal/api/config_batch"
+	"github.com/Gen-Do/service-configs/internal/api/config_crud"
 	"github.com/Gen-Do/service-configs/internal/generated/server/api"
-	"github.com/Gen-Do/service-configs/internal/workers/example"
+	"github.com/Gen-Do/service-configs/internal/metrics"
+	"github.com/Gen-Do/service-configs/internal/migrate"
+	"github.com/Gen-Do/service-configs/internal/repository"
+	"github.com/Gen-Do/service-configs/internal/service"
 	"github.com/go-chi/chi/middleware"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -27,22 +33,45 @@ func run() int {
 	log := obs.GetLogger()
 	log.Info(ctx, "Initializing service")
 
-	// Пример использования БД
-	//db, err := gorm.Open(postgres.Open(os.Getenv("DEP_DATABASE_DSN")), &gorm.Config{})
-	//if err != nil {
-	//	log.WithError(err).Fatal("Failed to connect to database")
-	//	return fail
-	//}
+	databaseDSN := os.Getenv("DATABASE_DSN")
+	if databaseDSN == "" {
+		databaseDSN = os.Getenv("DEP_DATABASE_DSN")
+	}
 
-	// Настройка HTTP сервера
+	db, err := sql.Open("pgx", databaseDSN)
+	if err != nil {
+		log.Error(log.WithError(ctx, err), "Failed to connect to database")
+		return platform.ExitCodeFailure
+	}
+	defer db.Close()
+
+	if err := migrate.Run(ctx, db); err != nil {
+		log.Error(log.WithError(ctx, err), "Failed to run migrations")
+		return platform.ExitCodeFailure
+	}
+
+	m := metrics.New(obs.GetMetrics().GetRegistry())
+
+	repo := repository.NewPostgresConfigRepository(db, m)
+	svc := service.NewConfigService(repo, m)
+
+	crudHandler := config_crud.NewHandler(svc)
+	batchHandler := config_batch.NewHandler(svc)
+
 	srv := api.CreateHandler(
 		api.WithMW(middleware.RequestID),
+		api.WithMW(m.InFlightMiddleware()),
 		api.WithMW(obs.HTTPMiddleware()),
 		api.WithBaseURL("/v1"),
 	)
 	obs.RegisterRoutes(srv.GetMux())
 
-	srv.SetGetExampleHandler(get_example.Handler)
+	srv.SetCreateConfigHandler(crudHandler.Create)
+	srv.SetListConfigsHandler(crudHandler.List)
+	srv.SetGetConfigHandler(crudHandler.Get)
+	srv.SetUpdateConfigHandler(crudHandler.Update)
+	srv.SetDeleteConfigHandler(crudHandler.Delete)
+	srv.SetBatchGetConfigsHandler(batchHandler.BatchGet)
 
 	lis := listener.New(
 		listener.WithIdleTimeout(10*time.Second),
@@ -51,7 +80,7 @@ func run() int {
 		listener.WithLogger(log),
 	)
 
-	err := platform.Run(ctx,
+	err = platform.Run(ctx,
 		platform.WithListener(lis),
 		platform.WithMux(srv.GetMux()),
 		platform.WithLogger(log),
@@ -60,7 +89,6 @@ func run() int {
 			Logger:  log,
 			Metrics: nil,
 		}),
-		platform.WithWorkers(example.NewWorker(log)),
 	)
 	if err != nil {
 		log.Error(log.WithError(ctx, err), "Application exited with error")

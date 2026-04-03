@@ -42,7 +42,7 @@ func (s *Server) {{.OperationId}}(w http.ResponseWriter, r *http.Request{{genPar
         w.WriteHeader(http.StatusNotImplemented)
         return
     }
-    typedFn(w, r{{genParamArgs .PathParams}}{{if .RequiresParamObject}}, params{{end}})
+    typedFn(w, r{{genParamNames .PathParams}}{{if .RequiresParamObject}}, params{{end}})
 }
 {{end}}
 
