@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Gen-Do/service-configs/internal/generated/server/api"
-	"github.com/Gen-Do/service-configs/internal/model"
+	"github.com/stream-gpt/service-configs/internal/generated/server/api"
+	"github.com/stream-gpt/service-configs/internal/model"
 )
 
 func toEntry(cfg *model.Config) api.ConfigEntry {

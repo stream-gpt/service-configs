@@ -1,4 +1,4 @@
-module github.com/Gen-Do/service-configs
+module github.com/stream-gpt/service-configs
 
 go 1.25.0
 

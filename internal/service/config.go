@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/Gen-Do/service-configs/internal/metrics"
-	"github.com/Gen-Do/service-configs/internal/model"
-	"github.com/Gen-Do/service-configs/internal/repository"
+	"github.com/stream-gpt/service-configs/internal/metrics"
+	"github.com/stream-gpt/service-configs/internal/model"
+	"github.com/stream-gpt/service-configs/internal/repository"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"

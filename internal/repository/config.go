@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Gen-Do/service-configs/internal/metrics"
-	"github.com/Gen-Do/service-configs/internal/model"
+	"github.com/stream-gpt/service-configs/internal/metrics"
+	"github.com/stream-gpt/service-configs/internal/model"
 )
 
 type ConfigRepository interface {

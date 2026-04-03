@@ -1,4 +1,4 @@
-module github.com/Gen-Do/service-configs/sdk
+module github.com/stream-gpt/service-configs/sdk
 
 go 1.24
 
