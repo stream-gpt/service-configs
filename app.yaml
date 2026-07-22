@@ -8,6 +8,7 @@ env:
     HEALTH_CHECK_ENABLED: true
     LOG_LEVEL: info
     METRICS_ENABLED: true
+    BOOT_WAIT_CEILING: 3m
 env.staging:
     LOG_LEVEL: debug
 env.production:

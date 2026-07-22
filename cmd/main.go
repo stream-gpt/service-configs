@@ -9,15 +9,16 @@ import (
 	observability "github.com/Gen-Do/lib-observability"
 	platform "github.com/Gen-Do/lib-platform"
 	"github.com/Gen-Do/lib-transport/listener"
+	"github.com/go-chi/chi/middleware"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stream-gpt/service-configs/internal/api/config_batch"
 	"github.com/stream-gpt/service-configs/internal/api/config_crud"
+	"github.com/stream-gpt/service-configs/internal/bootwait"
 	"github.com/stream-gpt/service-configs/internal/generated/server/api"
 	"github.com/stream-gpt/service-configs/internal/metrics"
 	"github.com/stream-gpt/service-configs/internal/migrate"
 	"github.com/stream-gpt/service-configs/internal/repository"
 	"github.com/stream-gpt/service-configs/internal/service"
-	"github.com/go-chi/chi/middleware"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -44,6 +45,24 @@ func run() int {
 		return platform.ExitCodeFailure
 	}
 	defer db.Close()
+
+	// sql.Open only validates the DSN — it does not establish a connection.
+	// On a cold host reboot, docker compose / k8s start every container at
+	// roughly the same time, so postgres may not be accepting connections
+	// yet the first time we actually touch it (previously: migrate.Run
+	// below would hard-fail here, and this service restarted ~19x during
+	// the 2026-07-19 reboot before postgres came up). Ping with bounded
+	// retry-with-backoff instead of fatal-exiting on the first attempt —
+	// see internal/bootwait. A postgres still unreachable after
+	// bootWaitCeiling (env BOOT_WAIT_CEILING, default 3m) is treated as
+	// genuinely dead and still fatal-exits.
+	pingErr := bootwait.WaitFor(ctx, log, "postgres", func(waitCtx context.Context) error {
+		return db.PingContext(waitCtx)
+	}, bootwait.Options{Ceiling: bootWaitCeiling()})
+	if pingErr != nil {
+		log.Error(log.WithError(ctx, pingErr), "Failed to connect to database")
+		return platform.ExitCodeFailure
+	}
 
 	if err := migrate.Run(ctx, db); err != nil {
 		log.Error(log.WithError(ctx, err), "Failed to run migrations")
@@ -98,4 +117,19 @@ func run() int {
 	log.Info(ctx, "Service stopped gracefully")
 
 	return platform.ExitCodeSuccess
+}
+
+// bootWaitCeiling returns the total time budget for boot-time dependency
+// waits (see internal/bootwait), env-tunable via BOOT_WAIT_CEILING. Falls
+// back to bootwait's own default (3m) if unset or unparsable.
+func bootWaitCeiling() time.Duration {
+	v := os.Getenv("BOOT_WAIT_CEILING")
+	if v == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0
+	}
+	return d
 }

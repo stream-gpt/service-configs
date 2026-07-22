@@ -77,6 +77,7 @@
 - `SERVICE_NAME` - имя сервиса для трассировки
 - `LOG_LEVEL` - уровень логирования (debug, info, warn, error)
 - `JAEGER_ENDPOINT` - эндпоинт Jaeger для трассировки
+- `BOOT_WAIT_CEILING` - ceiling для bounded retry-with-backoff ожидания postgres при старте (default `3m`; см. `internal/bootwait`, ADR-017 / TD-boot-1 Gap A) — гасит fatal-exit при гонке загрузки на холодном ребуте хоста, не маскирует по-настоящему недоступную БД
 
 ## Эндпоинты
 
